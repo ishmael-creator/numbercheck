@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f3d2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="NumberCheck">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>NumberCheck</title>
+<style>
+:root{--bg:#f4f6f3;--ink:#13201a;--mute:#64736b;--card:#fff;--line:#dfe5e0;--brand:#0f3d2e;--ok:#11834f;--okbg:#e3f5ea;--bad:#c8312b;--badbg:#fde7e5;--warn:#9a6a00;--warnbg:#fff4d6}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{background:var(--brand);color:#fff;padding:calc(14px + env(safe-area-inset-top)) 18px 14px;display:flex;align-items:center;gap:10px}
+header b{font-size:18px;letter-spacing:.2px}header span{margin-left:auto;font-size:12px;opacity:.85}
+main{max-width:520px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+label{font-size:13px;color:var(--mute);display:block;margin-bottom:6px}
+.row{display:flex;gap:8px}
+input{width:100%;font-size:26px;letter-spacing:1px;padding:14px;border:2px solid var(--line);border-radius:12px;outline:none;background:#fff;color:var(--ink)}
+input:focus{border-color:var(--brand)}
+input.small{font-size:15px;letter-spacing:0;padding:10px}
+button{font:inherit;border:0;border-radius:12px;padding:12px 14px;background:var(--brand);color:#fff;font-weight:600}
+button.ghost{background:transparent;color:var(--brand);border:1.5px solid var(--line)}
+button:disabled{opacity:.45}
+#result{display:none;margin-top:14px;border-radius:12px;padding:16px;font-weight:700;font-size:20px}
+#result small{display:block;font-weight:500;font-size:14px;margin-top:4px}
+#result.ok{display:block;background:var(--okbg);color:var(--ok)}
+#result.bad{display:block;background:var(--badbg);color:var(--bad)}
+#result.warn{display:block;background:var(--warnbg);color:var(--warn)}
+.stat{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;color:var(--mute)}.stat b{color:var(--ink)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#aaa;margin-right:6px}.on{background:#4ade80}
+details summary{cursor:pointer;color:var(--mute);font-size:14px}
+.hint{font-size:13px;color:var(--mute)}
+a.dl{display:block;text-align:center;text-decoration:none;background:var(--brand);color:#fff;padding:12px;border-radius:12px;font-weight:600;margin-top:8px}
+</style>
+</head>
+<body>
+<header><b>NumberCheck</b><span id="net"><i class="dot"></i>offline</span></header>
+<main>
+  <section class="card" id="setupCard" style="display:none">
+    <b>Set up this phone</b>
+    <p class="hint">Paste the setup code from your supervisor. Do this on Wi-Fi the first time: the list is about 1 MB.</p>
+    <label>Setup code</label><input class="small" id="code" autocomplete="off">
+    <button style="width:100%;margin-top:12px" id="saveSetup">Save</button>
+    <p class="hint" id="setupMsg"></p>
+  </section>
+
+  <section class="card" id="checkCard">
+    <label for="num">Customer phone number</label>
+    <div class="row">
+      <input id="num" type="tel" inputmode="tel" autocomplete="off" placeholder="024 123 4567">
+      <button class="ghost" id="paste" title="Paste">Paste</button>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <section class="card">
+    <div class="stat"><span>Numbers on this phone</span><b id="count">0</b></div>
+    <div class="stat"><span>List from</span><b id="listDate">—</b></div>
+    <div class="stat"><span>Last checked for updates</span><b id="synced">never</b></div>
+    <div class="row" style="margin-top:10px"><button style="flex:1" id="syncBtn">Update list now</button></div>
+    <p class="hint" id="syncMsg"></p>
+  </section>
+
+  <section class="card" id="androidCard" style="display:none">
+    <b>Android: automatic check inside SurveyCTO</b>
+    <p class="hint">Install the NumberCheck Android app to get a small alert while you type the number in SurveyCTO.</p>
+    <a class="dl" href="NumberCheck.apk" download>Download Android app</a>
+  </section>
+
+  <details class="card"><summary>Settings</summary>
+    <button class="ghost" id="reset">Change setup code</button>
+  </details>
+</main>
+
+<script>
+'use strict';
+var DB='numbercheck', LS='nc_cfg2', HB=5;
+var state={set:null, version:0, total:0, updated:null, lastSync:null};
+var $=function(id){return document.getElementById(id)};
+var cfg=JSON.parse(localStorage.getItem(LS)||'null');
+
+/* ---------- normalisation & scrambling (must match scripts/build_list.py and Android) ---------- */
+function normalize(raw){
+  var d=String(raw||'').replace(/\D/g,'');
+  if(d.indexOf('00233')===0) d=d.slice(5);
+  else if(d.indexOf('233')===0 && d.length>=12) d=d.slice(3);
+  if(d.length===9 && d[0]!=='0') d='0'+d;
+  return /^0\d{9}$/.test(d)?d:null;
+}
+async function sha(text){return new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))}
+function toNum(b,o){var v=0;for(var i=0;i<HB;i++) v=v*256+b[o+i];return v} // 40-bit fits exactly in a JS number
+async function scramble(n){return toNum(await sha('ncx1:'+cfg.s+':'+n),0)}
+async function saltCheck(){var b=await sha('check:'+cfg.s);return Array.from(b.slice(0,6)).map(function(x){return x.toString(16).padStart(2,'0')}).join('')}
+
+/* ---------- tiny IndexedDB key/value ---------- */
+function idb(){return new Promise(function(res,rej){var r=indexedDB.open(DB,1);r.onupgradeneeded=function(){r.result.createObjectStore('kv')};r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)}})}
+async function kvGet(k){var db=await idb();return new Promise(function(res){var q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=function(){res(q.result)};q.onerror=function(){res(undefined)}})}
+async function kvSet(k,v){var db=await idb();return new Promise(function(res){var t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=res})}
+
+function setFromBytes(b){var s=new Set();for(var i=0;i+HB<=b.length;i+=HB) s.add(toNum(b,i));return s}
+function bytesFromSet(set){
+  var a=Array.from(set).sort(function(x,y){return x-y}), out=new Uint8Array(a.length*HB);
+  for(var i=0;i<a.length;i++){var v=a[i];for(var j=HB-1;j>=0;j--){out[i*HB+j]=v%256;v=Math.floor(v/256)}}
+  return out;
+}
+
+async function load(){
+  var d=await kvGet('list');
+  if(d&&cfg&&d.salt===cfg.s){state.set=setFromBytes(new Uint8Array(d.bytes));state.version=d.version;state.total=d.total;state.updated=d.updated}
+  state.lastSync=(await kvGet('lastSync'))||null;
+  render();
+}
+async function save(){
+  await kvSet('list',{salt:cfg.s,version:state.version,total:state.total,updated:state.updated,bytes:bytesFromSet(state.set).buffer});
+}
+function when(t){return t?new Date(t).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'—'}
+function render(){
+  $('count').textContent=state.set?state.set.size.toLocaleString():'0';
+  $('listDate').textContent=when(state.updated);
+  $('synced').textContent=state.lastSync?when(state.lastSync):'never';
+  var on=navigator.onLine;$('net').innerHTML='<i class="dot '+(on?'on':'')+'"></i>'+(on?'online':'offline');
+}
+
+/* ---------- update the list: tiny manifest first, then only the day's changes ---------- */
+async function getBin(name){
+  var r=await fetch('data/'+name,{cache:'no-store'}); if(!r.ok) throw new Error('download failed');
+  return new Uint8Array(await r.arrayBuffer());
+}
+var syncing=false;
+async function sync(manual){
+  if(!cfg||syncing) return;
+  if(!navigator.onLine){if(manual)$('syncMsg').textContent='No internet. Checking still works with the saved list.';return}
+  syncing=true;$('syncBtn').disabled=true;$('syncMsg').textContent='Checking for updates…';
+  try{
+    var m=await (await fetch('data/manifest.json',{cache:'no-store'})).json();
+    if(m.saltCheck!==await saltCheck()) throw new Error('setup code is out of date — ask your supervisor for the new one');
+    if(state.set&&state.version===m.version){ $('syncMsg').textContent='List is up to date.'; }
+    else{
+      // follow the chain of daily changes from our version; otherwise download the full list
+      var chain=[], v=state.set?state.version:null;
+      while(v!==null&&v!==m.version){var d=m.deltas.find(function(x){return x.from===v}); if(!d){chain=null;break} chain.push(d); v=d.to}
+      if(chain&&chain.length){
+        for(var i=0;i<chain.length;i++){
+          var b=await getBin(chain[i].file), dv=new DataView(b.buffer), o=0;
+          var na=dv.getUint32(o); o+=4; for(var k=0;k<na;k++,o+=HB) state.set.add(toNum(b,o));
+          var nr=dv.getUint32(o); o+=4; for(var k2=0;k2<nr;k2++,o+=HB) state.set.delete(toNum(b,o));
+        }
+        $('syncMsg').textContent='Updated ('+chain.reduce(function(s,x){return s+x.bytes},0).toLocaleString()+' bytes downloaded).';
+      }else{
+        $('syncMsg').textContent='Downloading full list ('+Math.round(m.fullBytes/1024)+' KB)…';
+        state.set=setFromBytes(await getBin(m.full));
+        $('syncMsg').textContent='Full list downloaded.';
+      }
+      state.version=m.version;state.total=m.total;state.updated=m.updated;
+      await save();
+    }
+    state.lastSync=Date.now();await kvSet('lastSync',state.lastSync);
+  }catch(e){$('syncMsg').textContent='Could not update: '+e.message+'. Checking still works with the saved list.'}
+  syncing=false;$('syncBtn').disabled=false;render();check();
+}
+
+/* ---------- checking (always on the phone, instant, no network) ---------- */
+var seq=0;
+async function check(){
+  var raw=$('num').value, n=normalize(raw), res=$('result'), my=++seq;
+  if(!raw.replace(/\D/g,'')){res.className='';return}
+  if(!n){res.className='warn';res.innerHTML='Keep typing…<small>Enter a full 10-digit number</small>';return}
+  if(!state.set){res.className='warn';res.innerHTML='No list on this phone yet<small>Connect to the internet and tap Update list now</small>';return}
+  var h=await scramble(n); if(my!==seq) return;
+  if(state.set.has(h)){
+    res.className='bad';res.innerHTML='⚠ ALREADY REGISTERED<small>'+fmt(n)+' is in the system. Do not register again.</small>';
+    if(navigator.vibrate) navigator.vibrate([120,60,120]);
+  }else{
+    res.className='ok';res.innerHTML='✓ NEW NUMBER<small>'+fmt(n)+' is not in the system. OK to register.</small>';
+  }
+}
+function fmt(n){return n.slice(0,3)+' '+n.slice(3,6)+' '+n.slice(6)}
+
+/* ---------- setup ---------- */
+function decodeCode(code){
+  code=code.trim().replace(/^.*setup=/,'');
+  var b=code.replace(/-/g,'+').replace(/_/g,'/'); while(b.length%4) b+='=';
+  var o=JSON.parse(atob(b)); if(!o.s) throw 0; return o;
+}
+function showSetup(msg){$('setupCard').style.display='block';$('setupMsg').textContent=msg||''}
+$('saveSetup').onclick=async function(){
+  var o; try{o=decodeCode($('code').value)}catch(e){$('setupMsg').textContent='That setup code is not valid.';return}
+  cfg={s:o.s};localStorage.setItem(LS,JSON.stringify(cfg));
+  $('setupCard').style.display='none';state.set=null;state.version=0;render();sync(true);
+};
+$('reset').onclick=function(){showSetup()};
+
+/* ---------- wiring ---------- */
+$('num').addEventListener('input',check);
+$('syncBtn').onclick=function(){sync(true)};
+$('paste').onclick=async function(){try{$('num').value=await navigator.clipboard.readText();check()}catch(e){$('num').focus()}};
+addEventListener('online',function(){render();sync(false)});addEventListener('offline',render);
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&Date.now()-(state.lastSync||0)>3600e3) sync(false)});
+if(/Android/i.test(navigator.userAgent)) $('androidCard').style.display='block';
+
+(async function(){
+  var m=location.hash.match(/setup=([\w\-=]+)/);
+  if(m){ $('code').value=m[1]; history.replaceState(null,'',location.pathname); showSetup('Setup code filled in. Tap Save.'); }
+  else if(!cfg) showSetup();
+  await load();
+  if(cfg&&Date.now()-(state.lastSync||0)>3600e3) sync(false);
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+})();
+</script>
+</body>
+</html>

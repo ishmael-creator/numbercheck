@@ -1,0 +1,90 @@
+name: Build app and publish daily number list
+
+on:
+  schedule:
+    - cron: '30 10 * * *'      # every day 10:30 Ghana time (= UTC); GitHub may start it a few minutes late
+  push:
+    branches: [main]
+  workflow_dispatch:            # "Run workflow" button for days you update late
+    inputs:
+      force:
+        description: 'Publish even if the list got much smaller (only if you are sure)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      # ---------- 1. Number list (read-only from Neon) ----------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build scrambled number list
+        env:
+          NEON_READER_URL: ${{ secrets.NEON_READER_URL }}
+          NUMBERCHECK_SALT: ${{ secrets.NUMBERCHECK_SALT }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          pip install --quiet "psycopg[binary]"
+          python scripts/build_list.py
+
+      # ---------- 2. Android app ----------
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::Add the ANDROID_KEYSTORE_B64 secret first (see README)"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build Android APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 0.${{ github.run_number }}-pilot
+        run: |
+          gradle -p android assembleRelease --no-daemon -q
+          cp android/app/build/outputs/apk/release/app-release.apk web/NumberCheck.apk
+          ls -la web web/data
+
+      # ---------- 3. Publish website (app + list) ----------
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

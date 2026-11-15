@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">NumberCheck</string>
+    <string name="service_desc">Watches the phone number field in SurveyCTO and shows a small alert if the number is already registered. It only reads text in SurveyCTO and nothing is sent anywhere except numbers you mark as registered.</string>
+</resources>

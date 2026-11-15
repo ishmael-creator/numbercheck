@@ -1,0 +1,2 @@
+-keep class com.numbercheck.app.WatchService { *; }
+-keep class com.numbercheck.app.MainActivity { *; }

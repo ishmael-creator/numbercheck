@@ -1,0 +1,7 @@
+android/app/build/
+android/.gradle/
+android/build/
+*.keystore
+*SECRET*
+web/NumberCheck.apk
+web/data/
