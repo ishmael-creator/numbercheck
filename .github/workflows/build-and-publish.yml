@@ -65,13 +65,22 @@ jobs:
           echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
           echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
 
+      - name: Put today's list and setup inside the Android app
+        env:
+          NUMBERCHECK_SALT: ${{ secrets.NUMBERCHECK_SALT }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python scripts/bundle_android.py
+
       - name: Build Android APK
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: 0.${{ github.run_number }}-pilot
+          NUMBERCHECK_SALT: ${{ secrets.NUMBERCHECK_SALT }}
         run: |
           gradle -p android assembleRelease --no-daemon -q
-          cp android/app/build/outputs/apk/release/app-release.apk web/NumberCheck.apk
+          # private file name: only someone with the agents' link can work it out
+          NAME=$(python -c "import hashlib,os;print('app-'+hashlib.sha256(('apk:'+os.environ['NUMBERCHECK_SALT'].strip()).encode()).hexdigest()[:20]+'.apk')")
+          cp android/app/build/outputs/apk/release/app-release.apk "web/$NAME"
           ls -la web web/data
 
       # ---------- 3. Publish website (app + list) ----------

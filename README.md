@@ -6,7 +6,8 @@ Agents type a phone number and instantly see:
 - **Android:** a search box, plus an automatic alert while typing the number in SurveyCTO.
 - **iPhone:** a search box (installed from the same link).
 - **Works offline.** Every check happens on the phone, so it's instant even with no network.
-- **Light.** The phone keeps a scrambled copy of the list: about 1 MB for 200,000 numbers. Each day it downloads only that day's changes, usually a few KB.
+- **Light.** The phone keeps a scrambled copy of the list: about 1 MB for 200,000 numbers. The Android app comes with the list already inside. After that, phones download only the changes, usually a few KB.
+- **Fully automatic.** Nothing to set up or press. Phones update after 10:30 each day, or as soon as they next have internet. A phone that was offline for days catches up on everything it missed.
 - **Read-only.** Once a day it reads `contact_clean` from the `number_lookup` view using the read-only `number_lookup_reader` login. Nothing in Neon is created, changed or deleted.
 
 ## How it works
@@ -17,7 +18,7 @@ Neon (number_lookup view)
 GitHub (free): builds the scrambled list + the Android app
    │  publishes to one website
    ▼
-Agents' phones: download today's changes, check numbers offline
+Agents' phones: download the changes, check numbers offline
 ```
 The query it runs:
 ```sql
@@ -43,7 +44,7 @@ In the repo, go to **Settings › Secrets and variables › Actions › New repo
 | Name | Value |
 |---|---|
 | `NEON_READER_URL` | the connection string from step 1 |
-| `NUMBERCHECK_SALT` | a long random sentence you make up (e.g. `green stove 47 river moon`). It scrambles the numbers. Write it down and never change it, or every phone needs a new setup link. |
+| `NUMBERCHECK_SALT` | a long random sentence you make up (e.g. `green stove 47 river moon`). It scrambles the numbers. Write it down and never change it: changing it means a new link for iPhones and reinstalling the app on Androids. |
 | `ANDROID_KEYSTORE_PASSWORD` | from `NumberCheck-signing-key-SECRET.txt` |
 | `ANDROID_KEYSTORE_B64` | from `NumberCheck-signing-key-SECRET.txt` |
 
@@ -53,7 +54,7 @@ In the repo, go to **Settings › Secrets and variables › Actions › New repo
 3. Your site is now live at `https://YOUR-USERNAME.github.io/numbercheck/`
 
 ### 5. Make the agents' link
-Open `https://YOUR-USERNAME.github.io/numbercheck/admin.html` and type your `NUMBERCHECK_SALT`. It shows the agents' link and confirms it matches the published list. Share the link privately, like a password (e.g. a WhatsApp group of agents only).
+Open `https://YOUR-USERNAME.github.io/numbercheck/admin.html` and type your `NUMBERCHECK_SALT`. It shows the agents' link and confirms it matches the published list. This one link works for both Android and iPhone. Share it privately, like a password (e.g. a WhatsApp group of agents only).
 
 ---
 
@@ -67,25 +68,29 @@ Safety check: if the list suddenly shrinks by more than 20% (e.g. a database pro
 
 ## Agent instructions
 
-**Set up (once, on Wi-Fi)**
-- **Android:** open the link in Chrome › **Download Android app** › open the file.
-  - Allow "Install unknown apps" if asked.
-  - If Play Protect warns: **More details › Install anyway**. It warns only because the app isn't from the Play Store.
-  - Open NumberCheck › **Paste setup link** › **Save**.
-  - Tap **Turn on** › find **NumberCheck** › switch on. If greyed out ("Restricted setting"): **Settings › Apps › NumberCheck › ⋮ › Allow restricted settings**, then try again.
-- **iPhone:** open the link in **Safari** › **Save** › **Share › Add to Home Screen**.
+**Android (once)**
+1. Open the link in Chrome › **Download app** › open the downloaded file.
+   - Allow "Install unknown apps" if asked.
+   - If Play Protect warns: **More details › Install anyway**. It warns only because the app isn't from the Play Store.
+2. Open NumberCheck. It's already set up. Tap **Turn on**, find **NumberCheck** and switch it on.
+   - If greyed out ("Restricted setting"): **Settings › Apps › NumberCheck › ⋮ › Allow restricted settings**, then try again.
+3. Done. Fill SurveyCTO as normal. When you type the phone number, a banner pops up at the top:
+   - 🟢 **OK to register**
+   - 🔴 **already registered** (the phone also vibrates)
 
-**Daily use**
-- **Android:** fill SurveyCTO as normal. When you type the phone number, a banner pops up at the top: 🟢 OK to register, or 🔴 already registered (the phone also vibrates). The NumberCheck app also has a search box.
-- **iPhone:** open NumberCheck, type or paste the number, read the colour.
-- A mistyped number does nothing. Just correct it and the answer updates.
+   The NumberCheck app also has a box to check a number by hand.
+
+**iPhone (once):** open the link in Safari › **Share › Add to Home Screen**. Then open NumberCheck from the home screen, type or paste the number, and read the colour.
+
+A mistyped number does nothing. Just correct it and the answer updates.
 
 ---
 
 ## Good to know
 - **Freshness:** the list is as fresh as Neon. A customer registered today appears after the next daily refresh, once their entry has reached Neon.
-- **Privacy:** phones and the website hold only scrambled codes, not phone numbers. Without the salt they can't be turned back into numbers. The salt travels inside the agents' link, so keep that link private. If it leaks: set a new `NUMBERCHECK_SALT`, run the workflow, and send agents a new link.
+- **Privacy:** phones and the website hold only scrambled codes, not phone numbers. Without the salt they can't be turned back into numbers. The salt travels inside the agents' link and inside the Android app, so keep both private. The app's download address can only be worked out from the link. If either leaks: set a new `NUMBERCHECK_SALT`, run the workflow, send agents the new link, and have Android agents reinstall the app.
 - **Accuracy:** each number is stored as a 5-byte code. The chance of a new number being wrongly shown as registered is about 1 in 5 million checks at 200,000 numbers.
-- **What the Android app reads:** only text typed in SurveyCTO, and it only reacts to full phone numbers. It sends nothing anywhere. ("Also watch other apps" is for testing only.)
+- **What the Android app reads:** only text typed in SurveyCTO, and it only reacts to full phone numbers. It sends nothing anywhere.
+- **Catching up:** a phone offline for up to 3 weeks downloads just the missed changes. After longer than that, it downloads the full list again (about 1 MB) automatically.
 - **GitHub pauses daily jobs** in a repo with no changes for 60 days. If that happens, GitHub emails you; click **Enable workflow** in the Actions tab.
 - **Test first** on 2–3 Android phones with SurveyCTO Collect, to confirm the banner appears as you type.

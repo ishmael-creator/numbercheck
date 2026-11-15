@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.util.Base64;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -45,34 +44,33 @@ final class Store {
         ctx = c;
         p = c.getSharedPreferences("nc2", Context.MODE_PRIVATE);
         list = readFile(new File(ctx.getFilesDir(), "list.bin"));
+        loadBundled();
+    }
+
+    /**
+     * The app ships with the setup and the list from the day it was built (assets/).
+     * Use it on first start, or when a newer app was installed over an older one.
+     */
+    private void loadBundled() {
+        try {
+            JSONObject cfg = new JSONObject(new String(readAll(ctx.getAssets().open("config.json")), "UTF-8"));
+            JSONObject m = new JSONObject(new String(readAll(ctx.getAssets().open("manifest.json")), "UTF-8"));
+            String salt = cfg.getString("s");
+            boolean sameSetup = salt.equals(p.getString("salt", null));
+            if (sameSetup && list.length > 0 && p.getLong("version", -1) >= m.getLong("version")) return;
+            byte[] b = readAll(ctx.getAssets().open("list.bin"));
+            long[] a = decode(b, 0, b.length / HB);
+            Arrays.sort(a);
+            saveList(a);
+            synchronized (this) { list = a; }
+            p.edit().putString("salt", salt).putString("site", cfg.getString("u").replaceAll("/+$", ""))
+                    .putLong("version", m.getLong("version")).putString("updated", m.optString("updated", null)).apply();
+        } catch (Exception ignored) { /* no bundled list (development build) */ }
     }
 
     /* ---------- setup ---------- */
     boolean configured() { return p.getString("salt", null) != null; }
-    boolean watchAll() { return p.getBoolean("watchAll", false); }
-    void setWatchAll(boolean b) { p.edit().putBoolean("watchAll", b).apply(); }
     String site() { return p.getString("site", ""); }
-
-    /** Accepts the setup code, or the whole setup link (https://…/#setup=CODE). */
-    boolean setup(String code) {
-        try {
-            code = code.trim();
-            String site = null;
-            int i = code.indexOf("#setup=");
-            if (i > 0 && code.startsWith("https://")) site = code.substring(0, i).replaceAll("/+$", "");
-            i = code.indexOf("setup=");
-            if (i >= 0) code = code.substring(i + 6);
-            code = code.replaceAll("[^A-Za-z0-9_\\-=]", "");
-            JSONObject o = new JSONObject(new String(Base64.decode(code, Base64.URL_SAFE | Base64.NO_WRAP), "UTF-8"));
-            String s = o.getString("s");
-            if (o.has("u")) site = o.getString("u").replaceAll("/+$", "");
-            if (site == null || !site.startsWith("https://")) return false;
-            p.edit().putString("salt", s).putString("site", site).remove("version").remove("updated").apply();
-            synchronized (this) { list = new long[0]; }
-            new File(ctx.getFilesDir(), "list.bin").delete();
-            return true;
-        } catch (Exception e) { return false; }
-    }
 
     /* ---------- normalisation & scrambling (must match scripts/build_list.py and the web app) ---------- */
     static String normalize(CharSequence raw) {

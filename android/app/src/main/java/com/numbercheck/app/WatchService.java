@@ -47,13 +47,21 @@ public class WatchService extends AccessibilityService {
         pill.setElevation(dp(6));
         pill.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { hidePill(); } });
         ui.postDelayed(periodicSync, 3000);
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            netCb = new android.net.ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(android.net.Network n) { ui.postDelayed(new Runnable() { public void run() { store.syncAsync(); } }, 2000); }
+            };
+            cm.registerDefaultNetworkCallback(netCb);
+        } catch (Exception ignored) {}
     }
+    private android.net.ConnectivityManager.NetworkCallback netCb;
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e == null || store == null) return;
         CharSequence pkg = e.getPackageName();
         if (pkg == null || pkg.toString().equals(getPackageName())) return;
-        if (!store.watchAll() && !pkg.toString().toLowerCase().contains("surveycto")) {
+        if (!pkg.toString().toLowerCase().contains("surveycto")) {
             if (e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && shown) hidePill();
             return;
         }
@@ -83,7 +91,7 @@ public class WatchService extends AccessibilityService {
 
     private void evaluate(String n) {
         int r = store.lookup(n);
-        if (r < 0) { show(0xff9a6a00, "NumberCheck: no list yet — open the app and tap Update list", 5000); return; }
+        if (r < 0) { show(0xff9a6a00, "NumberCheck: list not ready — open the NumberCheck app once", 5000); return; }
         if (r == 1) {
             show(0xffc8312b, "⚠ ALREADY REGISTERED\n" + Store.pretty(n) + " — do not register again", 0);
             vibrate();
@@ -130,5 +138,9 @@ public class WatchService extends AccessibilityService {
     private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
     @Override public void onInterrupt() { hidePill(); }
-    @Override public void onDestroy() { ui.removeCallbacksAndMessages(null); hidePill(); super.onDestroy(); }
+    @Override public void onDestroy() {
+        ui.removeCallbacksAndMessages(null); hidePill();
+        try { if (netCb != null) ((android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE)).unregisterNetworkCallback(netCb); } catch (Exception ignored) {}
+        super.onDestroy();
+    }
 }

@@ -40,12 +40,9 @@ a.dl{display:block;text-align:center;text-decoration:none;background:var(--brand
 <body>
 <header><b>NumberCheck</b><span id="net"><i class="dot"></i>offline</span></header>
 <main>
-  <section class="card" id="setupCard" style="display:none">
-    <b>Set up this phone</b>
-    <p class="hint">Paste the setup code from your supervisor. Do this on Wi-Fi the first time: the list is about 1 MB.</p>
-    <label>Setup code</label><input class="small" id="code" autocomplete="off">
-    <button style="width:100%;margin-top:12px" id="saveSetup">Save</button>
-    <p class="hint" id="setupMsg"></p>
+  <section class="card" id="noSetup" style="display:none">
+    <b>Open the NumberCheck link from your supervisor</b>
+    <p class="hint">This page needs to be opened from the special link you were sent.</p>
   </section>
 
   <section class="card" id="checkCard">
@@ -57,23 +54,12 @@ a.dl{display:block;text-align:center;text-decoration:none;background:var(--brand
     <div id="result"></div>
   </section>
 
-  <section class="card">
-    <div class="stat"><span>Numbers on this phone</span><b id="count">0</b></div>
-    <div class="stat"><span>List from</span><b id="listDate">—</b></div>
-    <div class="stat"><span>Last checked for updates</span><b id="synced">never</b></div>
-    <div class="row" style="margin-top:10px"><button style="flex:1" id="syncBtn">Update list now</button></div>
-    <p class="hint" id="syncMsg"></p>
-  </section>
-
   <section class="card" id="androidCard" style="display:none">
-    <b>Android: automatic check inside SurveyCTO</b>
-    <p class="hint">Install the NumberCheck Android app to get a small alert while you type the number in SurveyCTO.</p>
-    <a class="dl" href="NumberCheck.apk" download>Download Android app</a>
+    <b>NumberCheck for Android</b>
+    <p class="hint">Download and install the app. It is ready to use as soon as you open it, and it alerts you while you type the number in SurveyCTO.</p>
+    <a class="dl" id="apk" href="#" download="NumberCheck.apk">Download app</a>
   </section>
 
-  <details class="card"><summary>Settings</summary>
-    <button class="ghost" id="reset">Change setup code</button>
-  </details>
 </main>
 
 <script>
@@ -117,11 +103,7 @@ async function load(){
 async function save(){
   await kvSet('list',{salt:cfg.s,version:state.version,total:state.total,updated:state.updated,bytes:bytesFromSet(state.set).buffer});
 }
-function when(t){return t?new Date(t).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'—'}
 function render(){
-  $('count').textContent=state.set?state.set.size.toLocaleString():'0';
-  $('listDate').textContent=when(state.updated);
-  $('synced').textContent=state.lastSync?when(state.lastSync):'never';
   var on=navigator.onLine;$('net').innerHTML='<i class="dot '+(on?'on':'')+'"></i>'+(on?'online':'offline');
 }
 
@@ -131,16 +113,14 @@ async function getBin(name){
   return new Uint8Array(await r.arrayBuffer());
 }
 var syncing=false;
-async function sync(manual){
-  if(!cfg||syncing) return;
-  if(!navigator.onLine){if(manual)$('syncMsg').textContent='No internet. Checking still works with the saved list.';return}
-  syncing=true;$('syncBtn').disabled=true;$('syncMsg').textContent='Checking for updates…';
+async function sync(){
+  if(!cfg||syncing||!navigator.onLine) return;
+  syncing=true;
   try{
     var m=await (await fetch('data/manifest.json',{cache:'no-store'})).json();
-    if(m.saltCheck!==await saltCheck()) throw new Error('setup code is out of date — ask your supervisor for the new one');
-    if(state.set&&state.version===m.version){ $('syncMsg').textContent='List is up to date.'; }
-    else{
-      // follow the chain of daily changes from our version; otherwise download the full list
+    if(m.saltCheck!==await saltCheck()) throw new Error('setup link out of date');
+    if(!(state.set&&state.version===m.version)){
+      // catch up: follow every daily change since our version; if any is missing, download the full list
       var chain=[], v=state.set?state.version:null;
       while(v!==null&&v!==m.version){var d=m.deltas.find(function(x){return x.from===v}); if(!d){chain=null;break} chain.push(d); v=d.to}
       if(chain&&chain.length){
@@ -149,18 +129,15 @@ async function sync(manual){
           var na=dv.getUint32(o); o+=4; for(var k=0;k<na;k++,o+=HB) state.set.add(toNum(b,o));
           var nr=dv.getUint32(o); o+=4; for(var k2=0;k2<nr;k2++,o+=HB) state.set.delete(toNum(b,o));
         }
-        $('syncMsg').textContent='Updated ('+chain.reduce(function(s,x){return s+x.bytes},0).toLocaleString()+' bytes downloaded).';
       }else{
-        $('syncMsg').textContent='Downloading full list ('+Math.round(m.fullBytes/1024)+' KB)…';
         state.set=setFromBytes(await getBin(m.full));
-        $('syncMsg').textContent='Full list downloaded.';
       }
       state.version=m.version;state.total=m.total;state.updated=m.updated;
       await save();
     }
     state.lastSync=Date.now();await kvSet('lastSync',state.lastSync);
-  }catch(e){$('syncMsg').textContent='Could not update: '+e.message+'. Checking still works with the saved list.'}
-  syncing=false;$('syncBtn').disabled=false;render();check();
+  }catch(e){console.log('update skipped:',e.message)}
+  syncing=false;render();check();
 }
 
 /* ---------- checking (always on the phone, instant, no network) ---------- */
@@ -169,7 +146,7 @@ async function check(){
   var raw=$('num').value, n=normalize(raw), res=$('result'), my=++seq;
   if(!raw.replace(/\D/g,'')){res.className='';return}
   if(!n){res.className='warn';res.innerHTML='Keep typing…<small>Enter a full 10-digit number</small>';return}
-  if(!state.set){res.className='warn';res.innerHTML='No list on this phone yet<small>Connect to the internet and tap Update list now</small>';return}
+  if(!state.set){res.className='warn';res.innerHTML='List not ready yet<small>Connect to the internet once, then try again</small>';return}
   var h=await scramble(n); if(my!==seq) return;
   if(state.set.has(h)){
     res.className='bad';res.innerHTML='⚠ ALREADY REGISTERED<small>'+fmt(n)+' is in the system. Do not register again.</small>';
@@ -180,34 +157,31 @@ async function check(){
 }
 function fmt(n){return n.slice(0,3)+' '+n.slice(3,6)+' '+n.slice(6)}
 
-/* ---------- setup ---------- */
+/* ---------- setup (comes inside the link) ---------- */
 function decodeCode(code){
-  code=code.trim().replace(/^.*setup=/,'');
   var b=code.replace(/-/g,'+').replace(/_/g,'/'); while(b.length%4) b+='=';
   var o=JSON.parse(atob(b)); if(!o.s) throw 0; return o;
 }
-function showSetup(msg){$('setupCard').style.display='block';$('setupMsg').textContent=msg||''}
-$('saveSetup').onclick=async function(){
-  var o; try{o=decodeCode($('code').value)}catch(e){$('setupMsg').textContent='That setup code is not valid.';return}
-  cfg={s:o.s};localStorage.setItem(LS,JSON.stringify(cfg));
-  $('setupCard').style.display='none';state.set=null;state.version=0;render();sync(true);
-};
-$('reset').onclick=function(){showSetup()};
 
 /* ---------- wiring ---------- */
 $('num').addEventListener('input',check);
-$('syncBtn').onclick=function(){sync(true)};
 $('paste').onclick=async function(){try{$('num').value=await navigator.clipboard.readText();check()}catch(e){$('num').focus()}};
-addEventListener('online',function(){render();sync(false)});addEventListener('offline',render);
-document.addEventListener('visibilitychange',function(){if(!document.hidden&&Date.now()-(state.lastSync||0)>3600e3) sync(false)});
-if(/Android/i.test(navigator.userAgent)) $('androidCard').style.display='block';
+addEventListener('online',function(){render();sync()});addEventListener('offline',render);
+document.addEventListener('visibilitychange',function(){if(!document.hidden) sync()});
+setInterval(sync,3600e3);
+var isAndroid=/Android/i.test(navigator.userAgent);
 
 (async function(){
   var m=location.hash.match(/setup=([\w\-=]+)/);
-  if(m){ $('code').value=m[1]; history.replaceState(null,'',location.pathname); showSetup('Setup code filled in. Tap Save.'); }
-  else if(!cfg) showSetup();
+  if(m){ try{ var o=decodeCode(m[1]); if(!cfg||cfg.s!==o.s){cfg={s:o.s};localStorage.setItem(LS,JSON.stringify(cfg))} }catch(e){} }
+  if(!cfg){ $('noSetup').style.display='block'; $('checkCard').style.display='none'; return; }
+  if(isAndroid){
+    var h=Array.from(await sha('apk:'+cfg.s)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,20);
+    $('apk').href='app-'+h+'.apk';
+    $('androidCard').style.display='block'; $('checkCard').style.display='none'; return;
+  }
   await load();
-  if(cfg&&Date.now()-(state.lastSync||0)>3600e3) sync(false);
+  sync();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 })();
 </script>

@@ -3,5 +3,6 @@ android/.gradle/
 android/build/
 *.keystore
 *SECRET*
-web/NumberCheck.apk
+web/*.apk
 web/data/
+android/app/src/main/assets/
