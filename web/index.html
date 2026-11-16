@@ -178,7 +178,7 @@ var isAndroid=/Android/i.test(navigator.userAgent);
   if(isAndroid){
     var h=Array.from(await sha('apk:'+cfg.s)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,20);
     $('apk').href='app-'+h+'.apk';
-    $('androidCard').style.display='block'; $('checkCard').style.display='none'; return;
+    $('androidCard').style.display='block';
   }
   await load();
   sync();
